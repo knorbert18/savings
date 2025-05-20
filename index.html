@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Savings Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f4f4f4;
+      color: #333;
+      padding: 20px;
+      max-width: 900px;
+      margin: auto;
+      transition: background 0.3s, color 0.3s;
+    }
+
+    body.dark-mode {
+      background: #121212;
+      color: #e0e0e0;
+    }
+
+    h1 {
+      text-align: center;
+      color: #004d40;
+    }
+
+    form, #dashboard, table {
+      background: white;
+      padding: 20px;
+      margin-top: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+    }
+
+    body.dark-mode form,
+    body.dark-mode #dashboard,
+    body.dark-mode table {
+      background: #1e1e1e;
+    }
+
+    label {
+      font-weight: 600;
+      margin-top: 10px;
+      display: block;
+    }
+
+    input[type="number"], input[type="text"], input[type="date"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      margin-top: 5px;
+      margin-bottom: 15px;
+    }
+
+    input:focus {
+      border-color: #26a69a;
+      outline: none;
+    }
+
+    button {
+      padding: 10px;
+      background: #26a69a;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      margin-right: 10px;
+    }
+
+    #theme-toggle {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: none;
+      border: none;
+      font-size: 1.5em;
+      cursor: pointer;
+      z-index: 999; /* Ensures the icon stays on top */
+    }
+
+    #progress-bar {
+      background: #ddd;
+      border-radius: 10px;
+      height: 20px;
+      margin-top: 10px;
+      overflow: hidden;
+    }
+
+    #progress {
+      background: #26a69a;
+      height: 100%;
+      width: 0%;
+      transition: width 0.5s ease-in-out;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 12px 10px;
+      border-bottom: 1px solid #eee;
+    }
+
+    th {
+      background: #e0f2f1;
+      color: #004d40;
+    }
+
+    .actions button {
+      background: #ef5350;
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-size: 0.85em;
+    }
+
+    @media (max-width: 600px) {
+      body {
+        padding: 10px;
+      }
+    }
+  </style>
+</head>
+<body class="light-mode">
+
+<button id="theme-toggle">
+  <span id="sun-icon">☀️</span>
+  <span id="moon-icon" style="display:none;">🌙</span>
+</button>
+
+<h1>Savings Tracker</h1>
+
+<form id="savings-form">
+  <label for="amount">Amount (₵):</label>
+  <input type="number" id="amount" required>
+
+  <label for="date">Date:</label>
+  <input type="date" id="date" required>
+
+  <label for="category">Category/Description:</label>
+  <input type="text" id="category" required>
+
+  <button type="submit">Add Savings Entry</button>
+</form>
+
+<form id="goal-form">
+  <label for="goal-amount">Set Savings Goal (₵):</label>
+  <input type="number" id="goal-amount" required>
+  <button type="submit">Set Goal</button>
+  <button type="button" id="export-csv">📁 Export to CSV</button>
+</form>
+
+<div id="dashboard">
+  <h2>Total Saved: <span id="total-saved">₵0.00</span></h2>
+  <canvas id="monthly-savings-chart" height="100"></canvas>
+  <h3>Savings Goal: <span id="savings-goal">₵5,000.00</span></h3>
+  <h4>Progress: <span id="goal-progress">0%</span></h4>
+  <div id="progress-bar">
+    <div id="progress"></div>
+  </div>
+</div>
+
+<table id="savings-history">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Amount (₵)</th>
+      <th>Category</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+  let savingsEntries = JSON.parse(localStorage.getItem('savingsEntries')) || [];
+  let savingsGoal = parseFloat(localStorage.getItem('savingsGoal')) || 5000;
+
+  const ctx = document.getElementById('monthly-savings-chart').getContext('2d');
+  let chart;
+
+  function formatCedis(amount) {
+    return new Intl.NumberFormat('en-GH', {
+      style: 'currency',
+      currency: 'GHS',
+      minimumFractionDigits: 2
+    }).format(amount);
+  }
+
+  function updateProgressBar(totalSaved, goal) {
+    const percent = Math.min((totalSaved / goal) * 100, 100);
+    document.getElementById('progress').style.width = percent + '%';
+    document.getElementById('goal-progress').innerText = Math.round(percent) + '%';
+  }
+
+  function populateSavingsHistory() {
+    const tbody = document.querySelector('#savings-history tbody');
+    tbody.innerHTML = '';
+    savingsEntries.forEach(entry => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${entry.date}</td>
+        <td>${formatCedis(entry.amount)}</td>
+        <td>${entry.category}</td>
+        <td class="actions">
+          <button onclick="editEntry(${entry.id})">✏️</button>
+          <button onclick="deleteEntry(${entry.id})">🗑️</button>
+        </td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  function deleteEntry(id) {
+    savingsEntries = savingsEntries.filter(entry => entry.id !== id);
+    localStorage.setItem('savingsEntries', JSON.stringify(savingsEntries));
+    updateDashboard();
+  }
+
+  function editEntry(id) {
+    const entry = savingsEntries.find(e => e.id === id);
+    document.getElementById('amount').value = entry.amount;
+    document.getElementById('date').value = entry.date;
+    document.getElementById('category').value = entry.category;
+    deleteEntry(id); // Remove old entry so it gets replaced on submit
+  }
+
+  function updateChart() {
+    const monthlyData = Array(12).fill(0);
+    savingsEntries.forEach(entry => {
+      const month = new Date(entry.date).getMonth();
+      monthlyData[month] += entry.amount;
+    });
+
+    const data = {
+      labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+      datasets: [{
+        label: 'Monthly Savings (₵)',
+        data: monthlyData,
+        backgroundColor: 'rgba(38, 166, 154, 0.2)',
+        borderColor: 'rgba(38, 166, 154, 1)',
+        borderWidth: 2,
+        tension: 0.4,
+        fill: true
+      }]
+    };
+
+    if (chart) {
+      chart.data.datasets[0].data = monthlyData;
+      chart.update();
+    } else {
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: data,
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: {
+                callback: value => `₵${value}`
+              }
+            }
+          }
+        }
+      });
+    }
+  }
+
+  function updateDashboard() {
+    const totalSaved = savingsEntries.reduce((sum, e) => sum + e.amount, 0);
+    document.getElementById('total-saved').innerText = formatCedis(totalSaved);
+    document.getElementById('savings-goal').innerText = formatCedis(savingsGoal);
+    updateProgressBar(totalSaved, savingsGoal);
+    populateSavingsHistory();
+    updateChart();
+  }
+
+  document.getElementById('savings-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+    const amount = parseFloat(document.getElementById('amount').value);
+    const date = document.getElementById('date').value;
+    const category = document.getElementById('category').value;
+
+    const entry = { id: Date.now(), amount, date, category };
+    savingsEntries.push(entry);
+    localStorage.setItem('savingsEntries', JSON.stringify(savingsEntries));
+    updateDashboard();
+    this.reset();
+  });
+
+  document.getElementById('goal-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+    savingsGoal = parseFloat(document.getElementById('goal-amount').value);
+    localStorage.setItem('savingsGoal', savingsGoal);
+    updateDashboard();
+    this.reset();
+  });
+
+  document.getElementById('export-csv').addEventListener('click', function() {
+    const csvContent = "data:text/csv;charset=utf-8,"
+      + "Date,Amount (₵),Category\n"
+      + savingsEntries.map(e => `${e.date},${e.amount},${e.category}`).join("\n");
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', 'savings_entries.csv');
+    document.body.appendChild(link);
+    link.click();
+  });
+
+  const themeToggle = document.getElementById('theme-toggle');
+  const sunIcon = document.getElementById('sun-icon');
+  const moonIcon = document.getElementById('moon-icon');
+
+  themeToggle.addEventListener('click', () => {
+    document.body.classList.toggle('dark-mode');
+    sunIcon.style.display = sunIcon.style.display === 'none' ? 'inline' : 'none';
+    moonIcon.style.display = moonIcon.style.display === 'none' ? 'inline' : 'none';
+  });
+
+  window.onload = updateDashboard;
+</script>
+
+</body>
+</html>
